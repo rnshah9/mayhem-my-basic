@@ -1,0 +1,5 @@
+project: rnshah9/mayhem-my-basic
+target: my-basic-bin
+
+cmds:
+  - cmd: /repo/output/my_basic_bin @@
