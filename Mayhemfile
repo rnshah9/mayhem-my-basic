@@ -2,4 +2,4 @@ project: my-basic
 target: my-basic-bin
 
 cmds:
-  - cmd: /repo/output/my_basic_bin @@
+  - cmd: /my_basic_bin @@
