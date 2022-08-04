@@ -84,6 +84,8 @@ extern "C" {
 #	define _BIN_FILE_NAME "my_basic"
 #elif defined MB_OS_MAC
 #	define _BIN_FILE_NAME "my_basic_mac"
+#elif defined MB_OS_LINUX
+#	define _BIN_FILE_NAME "my_basic_linux"
 #else
 #	define _BIN_FILE_NAME "my_basic_bin"
 #endif
@@ -466,11 +468,10 @@ static int _append_line(const char* txt) {
 		code->lines = (char**)realloc(code->lines, sizeof(char*) * code->size);
 	}
 	result = l = (int)strlen(txt);
-	buf = (char*)malloc(l + 2);
+	buf = (char*)malloc(l + 1);
 	_CHECK_MEM(buf);
 	memcpy(buf, txt, l);
-	buf[l] = '\n';
-	buf[l + 1] = '\0';
+	buf[l] = '\0';
 	code->lines[code->count++] = buf;
 
 	return result;
@@ -713,7 +714,7 @@ static int _new_program(void) {
 
 	_clear_code();
 
-	result = mb_reset(&bas, false);
+	result = mb_reset(&bas, false, false);
 
 	mb_gc(bas, 0);
 
@@ -851,7 +852,7 @@ static void _edit_program(const char* no) {
 	--lno;
 	memset(line, 0, _MAX_LINE_LENGTH);
 	_printf("%ld]", lno + 1);
-	mb_gets(0, line, _MAX_LINE_LENGTH);
+	mb_gets(bas, 0, line, _MAX_LINE_LENGTH);
 	l = (int)strlen(line);
 	_code()->lines[lno] = (char*)realloc(_code()->lines[lno], l + 2);
 	strcpy(_code()->lines[lno], line);
@@ -876,7 +877,7 @@ static void _insert_program(const char* no) {
 	--lno;
 	memset(line, 0, _MAX_LINE_LENGTH);
 	_printf("%ld]", lno + 1);
-	mb_gets(0, line, _MAX_LINE_LENGTH);
+	mb_gets(bas, 0, line, _MAX_LINE_LENGTH);
 	if(_code()->count + 1 == _code()->size) {
 		_code()->size += _REALLOC_INC_STEP;
 		_code()->lines = (char**)realloc(_code()->lines, sizeof(char*) * _code()->size);
@@ -1026,7 +1027,7 @@ static int _do_line(void) {
 
 	memset(line, 0, _MAX_LINE_LENGTH);
 	_printf("]");
-	mb_gets(0, line, _MAX_LINE_LENGTH);
+	mb_gets(bas, 0, line, _MAX_LINE_LENGTH);
 
 	memcpy(dup, line, _MAX_LINE_LENGTH);
 	strtok(line, " ");
@@ -1042,7 +1043,7 @@ static int _do_line(void) {
 	} else if(_str_eq(line, "RUN")) {
 		int i = 0;
 		mb_assert(_code());
-		result = mb_reset(&bas, false);
+		result = mb_reset(&bas, false, false);
 		for(i = 0; i < _code()->count; ++i) {
 			if(result)
 				break;
@@ -1366,7 +1367,7 @@ static int trace(struct mb_interpreter_t* s, void** l) {
 
 	mb_check(mb_attempt_close_bracket(s, l));
 
-	mb_check(mb_debug_get_stack_trace(s, l, frames, countof(frames)));
+	mb_check(mb_debug_get_stack_trace(s, frames, countof(frames)));
 
 	for(i = 1; i < countof(frames); ) {
 		if(frames[i]) {
@@ -1439,7 +1440,18 @@ static int beep(struct mb_interpreter_t* s, void** l) {
 ** Callbacks and handlers
 */
 
-static int _on_stepped(struct mb_interpreter_t* s, void** l, const char* f, int p, unsigned short row, unsigned short col) {
+static int _on_prev_stepped(struct mb_interpreter_t* s, void** l, const char* f, int p, unsigned short row, unsigned short col) {
+	mb_unrefvar(s);
+	mb_unrefvar(l);
+	mb_unrefvar(f);
+	mb_unrefvar(p);
+	mb_unrefvar(row);
+	mb_unrefvar(col);
+
+	return MB_FUNC_OK;
+}
+
+static int _on_post_stepped(struct mb_interpreter_t* s, void** l, const char* f, int p, unsigned short row, unsigned short col) {
 	mb_unrefvar(s);
 	mb_unrefvar(l);
 	mb_unrefvar(f);
@@ -1451,34 +1463,36 @@ static int _on_stepped(struct mb_interpreter_t* s, void** l, const char* f, int 
 }
 
 static void _on_error(struct mb_interpreter_t* s, mb_error_e e, const char* m, const char* f, int p, unsigned short row, unsigned short col, int abort_code) {
+	const char* type = abort_code == MB_FUNC_WARNING ? "Warning" : "Error";
 	mb_unrefvar(s);
 	mb_unrefvar(p);
 
-	if(e != SE_NO_ERR) {
-		if(f) {
-			if(e == SE_RN_REACHED_TO_WRONG_FUNCTION) {
-				_printf(
-					"Error:\n    Ln %d, Col %d in Func: %s\n    Code %d, Abort Code %d\n    Message: %s.\n",
-					row, col, f,
-					e, abort_code,
-					m
-				);
-			} else {
-				_printf(
-					"Error:\n    Ln %d, Col %d in File: %s\n    Code %d, Abort Code %d\n    Message: %s.\n",
-					row, col, f,
-					e, e == SE_EA_EXTENDED_ABORT ? abort_code - MB_EXTENDED_ABORT : abort_code,
-					m
-				);
-			}
+	if(e == SE_NO_ERR)
+		return;
+
+	if(f) {
+		if(e == SE_RN_REACHED_TO_WRONG_FUNCTION) {
+			_printf(
+				"%s:\n    Ln %d, Col %d in Func: %s\n    Code %d, Abort Code %d\n    Message: %s.\n",
+				type, row, col, f,
+				e, abort_code,
+				m
+			);
 		} else {
 			_printf(
-				"Error:\n    Ln %d, Col %d\n    Code %d, Abort Code %d\n    Message: %s.\n",
-				row, col,
+				"%s:\n    Ln %d, Col %d in File: %s\n    Code %d, Abort Code %d\n    Message: %s.\n",
+				type, row, col, f,
 				e, e == SE_EA_EXTENDED_ABORT ? abort_code - MB_EXTENDED_ABORT : abort_code,
 				m
 			);
 		}
+	} else {
+		_printf(
+			"%s:\n    Ln %d, Col %d\n    Code %d, Abort Code %d\n    Message: %s.\n",
+			type, row, col,
+			e, e == SE_EA_EXTENDED_ABORT ? abort_code - MB_EXTENDED_ABORT : abort_code,
+			m
+		);
 	}
 }
 
@@ -1520,7 +1534,7 @@ static void _on_startup(void) {
 
 	mb_open(&bas);
 
-	mb_debug_set_stepped_handler(bas, _on_stepped);
+	mb_debug_set_stepped_handler(bas, _on_prev_stepped, _on_post_stepped);
 	mb_set_error_handler(bas, _on_error);
 	mb_set_import_handler(bas, _on_import);
 

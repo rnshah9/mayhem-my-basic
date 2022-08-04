@@ -188,6 +188,14 @@ extern "C" {
 #	define MB_CONVERT_TO_INT_LEVEL MB_CONVERT_TO_INT_LEVEL_ALL
 #endif /* MB_CONVERT_TO_INT_LEVEL */
 
+#ifndef MB_PRINT_INPUT_PROMPT
+#	define MB_PRINT_INPUT_PROMPT 1
+#endif /* MB_PRINT_INPUT_PROMPT */
+
+#ifndef MB_PRINT_INPUT_CONTENT
+#	define MB_PRINT_INPUT_CONTENT 0
+#endif /* MB_PRINT_INPUT_CONTENT */
+
 #ifndef MB_PREFER_SPEED
 #	define MB_PREFER_SPEED
 #endif /* MB_PREFER_SPEED */
@@ -278,15 +286,13 @@ extern "C" {
 #ifndef mb_stricmp
 #	ifdef MB_CP_VC
 #		define mb_stricmp _strcmpi
-#	else /* MB_CP_VC */
-#		ifdef MB_CP_BORLANDC
-#			define mb_stricmp stricmp
-#		elif defined MB_CP_PELLESC
-#			define mb_stricmp _stricmp
-#		else
-#			define mb_stricmp strcasecmp
-#		endif
-#	endif /* MB_CP_VC */
+#	elif defined MB_CP_BORLANDC
+#		define mb_stricmp stricmp
+#	elif defined MB_CP_PELLESC
+#		define mb_stricmp _stricmp
+#	else
+#		define mb_stricmp strcasecmp
+#	endif
 #endif /* mb_stricmp */
 
 #ifndef mb_assert
@@ -401,13 +407,14 @@ typedef enum mb_error_e {
 	SE_NO_ERR = 0,
 	/** Common */
 	SE_CM_FUNC_EXISTS,
-	SE_CM_FUNC_NOT_EXISTS,
+	SE_CM_FUNC_DOES_NOT_EXIST,
 	SE_CM_NOT_SUPPORTED,
 	/** Parsing */
 	SE_PS_FAILED_TO_OPEN_FILE,
 	SE_PS_SYMBOL_TOO_LONG,
 	SE_PS_INVALID_CHAR,
 	SE_PS_INVALID_MODULE,
+	SE_PS_DUPLICATE_IMPORT,
 	/** Running */
 	SE_RN_EMPTY_PROGRAM,
 	SE_RN_PROGRAM_TOO_LONG,
@@ -428,7 +435,7 @@ typedef enum mb_error_e {
 	SE_RN_CANNOT_ASSIGN_TO_RESERVED_WORD,
 	SE_RN_DUPLICATE_ID,
 	SE_RN_INCOMPLETE_STRUCTURE,
-	SE_RN_LABEL_NOT_EXISTS,
+	SE_RN_LABEL_DOES_NOT_EXIST,
 	SE_RN_NO_RETURN_POINT,
 	SE_RN_COLON_EXPECTED,
 	SE_RN_COMMA_EXPECTED,
@@ -562,10 +569,11 @@ typedef int (* mb_func_t)(struct mb_interpreter_t*, void**);
 typedef int (* mb_has_routine_arg_func_t)(struct mb_interpreter_t*, void**, mb_value_t*, unsigned, unsigned*, void*);
 typedef int (* mb_pop_routine_arg_func_t)(struct mb_interpreter_t*, void**, mb_value_t*, unsigned, unsigned*, void*, mb_value_t*);
 typedef int (* mb_routine_func_t)(struct mb_interpreter_t*, void**, mb_value_t*, unsigned, void*, mb_has_routine_arg_func_t, mb_pop_routine_arg_func_t);
+typedef void (* mb_var_retrieving_func_t)(struct mb_interpreter_t*, const char*, mb_value_t);
 typedef int (* mb_debug_stepped_handler_t)(struct mb_interpreter_t*, void**, const char*, int, unsigned short, unsigned short);
 typedef void (* mb_error_handler_t)(struct mb_interpreter_t*, mb_error_e, const char*, const char*, int, unsigned short, unsigned short, int);
-typedef int (* mb_print_func_t)(const char*, ...);
-typedef int (* mb_input_func_t)(const char*, char*, int);
+typedef int (* mb_print_func_t)(struct mb_interpreter_t*, const char*, ...);
+typedef int (* mb_input_func_t)(struct mb_interpreter_t*, const char*, char*, int);
 typedef int (* mb_import_handler_t)(struct mb_interpreter_t*, const char*);
 typedef void (* mb_dtor_func_t)(struct mb_interpreter_t*, void*);
 typedef void* (* mb_clone_func_t)(struct mb_interpreter_t*, void*);
@@ -587,9 +595,9 @@ MBAPI int mb_init(void);
 MBAPI int mb_dispose(void);
 MBAPI int mb_open(struct mb_interpreter_t** s);
 MBAPI int mb_close(struct mb_interpreter_t** s);
-MBAPI int mb_reset(struct mb_interpreter_t** s, bool_t clrf/* = false*/);
+MBAPI int mb_reset(struct mb_interpreter_t** s, bool_t clear_funcs/* = false*/, bool_t clear_vars/* = true*/);
 
-MBAPI int mb_fork(struct mb_interpreter_t** s, struct mb_interpreter_t* r, bool_t clfk/* = true*/);
+MBAPI int mb_fork(struct mb_interpreter_t** s, struct mb_interpreter_t* r, bool_t clear_forked/* = true*/);
 MBAPI int mb_join(struct mb_interpreter_t** s);
 MBAPI int mb_get_forked_from(struct mb_interpreter_t* s, struct mb_interpreter_t** src);
 
@@ -621,6 +629,7 @@ MBAPI int mb_get_class_userdata(struct mb_interpreter_t* s, void** l, void** d);
 MBAPI int mb_set_class_userdata(struct mb_interpreter_t* s, void** l, void* d);
 
 MBAPI int mb_get_value_by_name(struct mb_interpreter_t* s, void** l, const char* n, mb_value_t* val);
+MBAPI int mb_get_vars(struct mb_interpreter_t* s, void** l, mb_var_retrieving_func_t r, int stack_offset/* = 0*/);
 MBAPI int mb_add_var(struct mb_interpreter_t* s, void** l, const char* n, mb_value_t val, bool_t force);
 MBAPI int mb_get_var(struct mb_interpreter_t* s, void** l, void** v, bool_t redir);
 MBAPI int mb_get_var_name(struct mb_interpreter_t* s, void* v, char** n);
@@ -658,8 +667,9 @@ MBAPI int mb_schedule_suspend(struct mb_interpreter_t* s, int t);
 
 MBAPI int mb_debug_get(struct mb_interpreter_t* s, const char* n, mb_value_t* val);
 MBAPI int mb_debug_set(struct mb_interpreter_t* s, const char* n, mb_value_t val);
-MBAPI int mb_debug_get_stack_trace(struct mb_interpreter_t* s, void** l, char** fs, unsigned fc);
-MBAPI int mb_debug_set_stepped_handler(struct mb_interpreter_t* s, mb_debug_stepped_handler_t h);
+MBAPI int mb_debug_count_stack_frames(struct mb_interpreter_t* s);
+MBAPI int mb_debug_get_stack_trace(struct mb_interpreter_t* s, char** fs, unsigned fc);
+MBAPI int mb_debug_set_stepped_handler(struct mb_interpreter_t* s, mb_debug_stepped_handler_t prev, mb_debug_stepped_handler_t post);
 
 MBAPI const char* mb_get_type_string(mb_data_e t);
 
@@ -678,7 +688,7 @@ MBAPI int mb_set_gc_enabled(struct mb_interpreter_t* s, bool_t gc);
 MBAPI int mb_gc(struct mb_interpreter_t* s, int_t* collected/* = NULL*/);
 MBAPI int mb_get_userdata(struct mb_interpreter_t* s, void** d);
 MBAPI int mb_set_userdata(struct mb_interpreter_t* s, void* d);
-MBAPI int mb_gets(const char* pmt, char* buf, int s);
+MBAPI int mb_gets(struct mb_interpreter_t* s, const char* pmt, char* buf, int n);
 MBAPI char* mb_memdup(const char* val, unsigned size);
 
 #ifdef MB_COMPACT_MODE
