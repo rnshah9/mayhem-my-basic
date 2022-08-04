@@ -1,5 +1,5 @@
 project: my-basic
-target: my-basic-bin
+target: my-basic
 
 cmds:
-  - cmd: /my_basic_bin @@
+  - cmd: /my_basic @@

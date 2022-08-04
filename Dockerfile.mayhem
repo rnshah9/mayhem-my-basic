@@ -8,4 +8,4 @@ WORKDIR /repo
 RUN make -j8
 
 FROM ubuntu:20.04 as package
-COPY --from=builder /repo/output/my_basic_bin /
+COPY --from=builder /repo/output/my_basic /
